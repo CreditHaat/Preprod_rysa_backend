@@ -19,6 +19,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -31,10 +32,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lsp.web.Exception.UserInfoNotFoundException;
 import com.lsp.web.dto.ONDCFormDataDTO;
+import com.lsp.web.entity.ApplyFail;
 import com.lsp.web.entity.Callback;
 import com.lsp.web.entity.JourneyLog;
 import com.lsp.web.entity.Logger;
 import com.lsp.web.entity.UserInfo;
+import com.lsp.web.repository.ApplyFailRepository;
 import com.lsp.web.repository.CallbackRepository;
 import com.lsp.web.repository.JourneyLogRepository;
 import com.lsp.web.repository.LoggerRepository;
@@ -63,6 +66,9 @@ public class SearchService {
 	private TxnLogService txnLogService;
 
 	private final RestTemplate restTemplate;
+	
+	@Autowired
+	private ApplyFailRepository applyFailRepository;
 
 	public SearchService(RestTemplate restTemplate) {
 		this.restTemplate = restTemplate;
@@ -267,13 +273,27 @@ public class SearchService {
 
 			ondcFormDataDTO.setEndUse("consumerDurablePurchase"); // if static
 //            ondcFormDataDTO.setIncome(userInfo.getMonthlyIncome() != null ? userInfo.getMonthlyIncome().toString() : null);
-			ondcFormDataDTO.setIncome("100000");
+			int inc = 0;
+			if (userInfo.getMonthlyIncome() != null) {
+			    try {
+			        // Use BigDecimal to handle both integer and decimal values
+			        BigDecimal income = new BigDecimal(userInfo.getMonthlyIncome().toString());
+			        inc = income.intValue(); // safely converts (truncates decimal part if present)
+			    } catch (NumberFormatException e) {
+			        // log and keep inc = 0 if parsing fails
+			        System.err.println("Invalid income format: " + userInfo.getMonthlyIncome());
+			    }
+			}
+			
+			ondcFormDataDTO.setIncome(String.valueOf(inc));
 			ondcFormDataDTO.setCompanyName(userInfo.getCompanyName());
 			ondcFormDataDTO.setUdyamNumber("UDYAM-ABC123"); // static or from another source
 			ondcFormDataDTO.setAddressL1(userInfo.getAddress());
 			ondcFormDataDTO.setAddressL2(""); // Optional field
-			ondcFormDataDTO.setCity("Pune"); // Static or derive if available
-			ondcFormDataDTO.setState("Maharashtra"); // Same
+//			ondcFormDataDTO.setCity("Pune"); // Static or derive if available
+//			ondcFormDataDTO.setState("Maharashtra"); // Same
+			ondcFormDataDTO.setCity("NA");
+			ondcFormDataDTO.setState("NA");
 			ondcFormDataDTO.setPincode(
 					userInfo.getResidentialPincode() != null ? userInfo.getResidentialPincode().toString() : null);
 			ondcFormDataDTO.setAa_id(userInfo.getMobileNumber() + "@finvu");
@@ -343,5 +363,73 @@ public class SearchService {
 		return ResponseEntity.ok(Map.of("message", Map.of("ack", Map.of("status", "ACK"))));
 
 	}
+
+	public void writeFormLogs(String mobileNumber, String request, String response, String gatewayUrl, String transactionId, String formSubmissionStatus, String productName) {
+		
+		// Load the userInfo to save the userInfo id into journeyLog
+					UserInfo userInfo;
+					Optional<UserInfo> optionalUserInfo = userInfoRepository.findByMobileNumber(mobileNumber);
+					if (optionalUserInfo.isEmpty()) {
+						throw new UserInfoNotFoundException("UserInfo not found with mobileNumber : " + mobileNumber);
+
+					}
+					userInfo = optionalUserInfo.get();
+
+					// logic to save the journey log
+					JourneyLog journeyLog = new JourneyLog();
+					journeyLog.setPlatformId("O");
+					journeyLog.setRequestId(gatewayUrl);
+					journeyLog.setStage(1);
+					journeyLog.setUId(transactionId);
+					journeyLog.setUser(userInfo);
+					journeyLogRepository.save(journeyLog);
+
+					// here we will save this api call in logger
+					Logger logger = new Logger();
+					logger.setJourneyLog(journeyLog);
+//		            logger.setUrl(gatewayUrl);// this url doesnt refers the value of api url it holds the url if we get from response of that api
+					logger.setRequestPayload(request);
+					logger.setResponsePayload(response);
+
+					loggerRepository.save(logger);
+					
+					if(formSubmissionStatus.equalsIgnoreCase("rejected")) {
+						ApplyFail applyFail;
+						
+						
+						Optional<ApplyFail> optionalApplyFail = applyFailRepository.findByUserAndProductName(userInfo, productName);
+						if(optionalApplyFail.isEmpty()) {
+							applyFail = new ApplyFail();
+							applyFail.setJourneyLog(journeyLog);
+							applyFail.setProductName(productName);
+							applyFail.setUser(userInfo);
+							applyFail.setUserMobileNumber(mobileNumber);
+							
+						}else {
+							applyFail = optionalApplyFail.get();
+							applyFail.setJourneyLog(journeyLog);
+						}
+						
+						applyFailRepository.save(applyFail);
+					}
+		
+	}
+
+//	public void writeFormLogs(ONDCFormDataDTO ondcFormDataDTO) {
+//		UserInfo userInfo;
+//		Optional<UserInfo> optionalUserInfo = userInfoRepository.findByMobileNumber("8010489800");
+//		if (optionalUserInfo.isEmpty()) {
+//			throw new UserInfoNotFoundException("UserInfo not found with mobileNumber : " + "8010489800");
+//
+//		}
+//		userInfo = optionalUserInfo.get();
+//		
+//		Logger logger = new Logger();
+////		logger.setJourneyLog(journeyLog);
+////        logger.setUrl(gatewayUrl);// this url doesnt refers the value of api url it holds the url if we get from response of that api
+//		logger.setRequestPayload(String.valueOf(ondcFormDataDTO));
+//		
+//		System.out.println("Everything fine");
+//	}
 
 }
