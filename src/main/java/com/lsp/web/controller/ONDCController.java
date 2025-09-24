@@ -67,7 +67,11 @@ import com.lsp.web.dto.UpdateFulfillmentRequestDTO;
 import com.lsp.web.dto.UpdatePaymentRequestDTO;
 import com.lsp.web.dto.UpdateRequestDTO;
 import com.lsp.web.entity.Callback;
+import com.lsp.web.entity.JourneyLog;
+import com.lsp.web.entity.UserInfo;
 import com.lsp.web.repository.CallbackRepository;
+import com.lsp.web.repository.JourneyLogRepository;
+import com.lsp.web.repository.UserInfoRepository;
 
 import ondc.onboarding.utility.Routes;
 import ondc.onboarding.utility.Utils;
@@ -104,6 +108,15 @@ public class ONDCController extends Utils {
 	
 	@Autowired
 	private CallbackRepository callbackRepository;
+	
+	@Autowired
+	private JourneyLogRepository journeyLogRepository;
+	
+	@Autowired
+	private UserInfoRepository userInfoRepository;
+	
+//	@Autowired
+//	private UserBureauDataRepository userBureauDataRepository;
 
 	@GetMapping("/createTransactionId")
 	public ResponseEntity<?> createId() {
@@ -410,5 +423,31 @@ public class ONDCController extends Utils {
 //			return null;
 //		}
 //	}
+	
+	@PostMapping("/saveStage")
+	public ResponseEntity<?> saveStage(@RequestParam(name="mobileNumber") String mobileNumber, @RequestParam(name="transactionId") String transactionId, @RequestParam(name="gatewayUrl") String gatewayUrl, @RequestParam(name="platformId") String platformId, @RequestParam(name="stage") int stage){
+		try {
+			Optional<UserInfo> userInfo = userInfoRepository.findByMobileNumber(mobileNumber);
+			if(userInfo.isEmpty()) {
+//				return null;
+				return ResponseEntity.ok("null");
+			}
+			
+			JourneyLog journeyLog = new JourneyLog();
+			journeyLog.setPlatformId(platformId);
+			journeyLog.setUser(userInfo.get());
+			journeyLog.setRequestId(gatewayUrl);
+			journeyLog.setUId(transactionId);
+			journeyLog.setStage(stage);
+			
+			journeyLogRepository.save(journeyLog);
+			
+			return ResponseEntity.ok("ok");
+		}catch(Exception e) {
+			e.printStackTrace();
+//			return null;
+			return ResponseEntity.ok("exception occured");
+		}
+	}
 
 }
